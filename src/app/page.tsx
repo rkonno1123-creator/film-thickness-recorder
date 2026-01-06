@@ -31,9 +31,17 @@ interface SessionInfo {
   operator: string;
   instrument: string;
   selectedInstruments: string[]; // 今日使う測定器リスト
+  siteName: string; // 現場名
+  siteId: string; // 現場ID
 }
 
-// デモ用のダミーデータ
+// 現場リスト
+const SITES = [
+  { id: 'maedagawa-nobori', name: '前田川 上り', file: '/sites/maedagawa-nobori.csv' },
+  // { id: 'maedagawa-kudari', name: '前田川 下り', file: '/sites/maedagawa-kudari.csv' },
+] as const;
+
+// デモ用のダミーデータ（現場未選択時）
 const defaultPoints: MeasurementPoint[] = [
   { id: '1', name: 'G1_主桁_①-1', category: 'general', routeOrder: 1 },
   { id: '2', name: 'G1_主桁_①-2', category: 'general', routeOrder: 2 },
@@ -85,14 +93,18 @@ export default function Home() {
   const [sessionInfo, setSessionInfo] = useState<SessionInfo>({ 
     operator: '', 
     instrument: '',
-    selectedInstruments: [] 
+    selectedInstruments: [],
+    siteName: '',
+    siteId: ''
   });
   const [tempOperator, setTempOperator] = useState('');
   const [tempInstrument, setTempInstrument] = useState('');
   const [tempSelectedInstruments, setTempSelectedInstruments] = useState<string[]>([]);
+  const [tempSiteId, setTempSiteId] = useState('');
   const [showInstrumentModal, setShowInstrumentModal] = useState(false);
   const [pendingPointId, setPendingPointId] = useState<string | null>(null);
   const [editingMeasurement, setEditingMeasurement] = useState<SavedMeasurement | null>(null);
+  const [isLoadingSite, setIsLoadingSite] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // ローカルストレージから読み込み
@@ -110,11 +122,14 @@ export default function Home() {
       const session = JSON.parse(storedSession);
       setSessionInfo({
         ...session,
-        selectedInstruments: session.selectedInstruments || []
+        selectedInstruments: session.selectedInstruments || [],
+        siteName: session.siteName || '',
+        siteId: session.siteId || ''
       });
-      setTempOperator(session.operator);
-      setTempInstrument(session.instrument);
+      setTempOperator(session.operator || '');
+      setTempInstrument(session.instrument || '');
       setTempSelectedInstruments(session.selectedInstruments || []);
+      setTempSiteId(session.siteId || '');
     }
   }, []);
 
@@ -180,14 +195,59 @@ export default function Home() {
     );
   };
 
+  // 現場選択時にCSVを読み込む
+  const handleSiteChange = async (siteId: string) => {
+    setTempSiteId(siteId);
+    
+    if (!siteId) {
+      setPoints(defaultPoints);
+      return;
+    }
+
+    const site = SITES.find(s => s.id === siteId);
+    if (!site) return;
+
+    setIsLoadingSite(true);
+    try {
+      const response = await fetch(site.file);
+      const text = await response.text();
+      const lines = text.split('\n').filter(line => line.trim());
+      
+      const dataLines = lines[0].includes('id') || lines[0].includes('name') 
+        ? lines.slice(1) 
+        : lines;
+      
+      const newPoints: MeasurementPoint[] = dataLines.map((line, index) => {
+        const cols = line.split(',').map(col => col.trim());
+        return {
+          id: cols[0] || String(index + 1),
+          name: cols[1] || cols[0],
+          category: (cols[2] as MeasurementPoint['category']) || 'general',
+          routeOrder: parseInt(cols[3]) || index + 1,
+        };
+      });
+
+      setPoints(newPoints);
+      localStorage.setItem('measurementPoints', JSON.stringify(newPoints));
+    } catch (error) {
+      console.error('Failed to load site CSV:', error);
+      alert('現場データの読み込みに失敗しました');
+    } finally {
+      setIsLoadingSite(false);
+    }
+  };
+
   // セッション開始
   const handleStartSession = () => {
-    if (!tempOperator.trim() || !tempInstrument.trim() || tempSelectedInstruments.length === 0) return;
+    if (!tempOperator.trim() || !tempInstrument.trim() || tempSelectedInstruments.length === 0 || !tempSiteId) return;
     
-    const newSession = { 
+    const site = SITES.find(s => s.id === tempSiteId);
+    const newSession: SessionInfo = { 
       operator: tempOperator.trim(), 
       instrument: tempInstrument.trim(),
-      selectedInstruments: tempSelectedInstruments
+      selectedInstruments: tempSelectedInstruments,
+      siteName: site?.name || '',
+      siteId: tempSiteId
     };
     setSessionInfo(newSession);
     localStorage.setItem('sessionInfo', JSON.stringify(newSession));
@@ -440,6 +500,31 @@ export default function Home() {
           <div className="space-y-4">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
+                現場を選択
+              </label>
+              <select
+                value={tempSiteId}
+                onChange={(e) => handleSiteChange(e.target.value)}
+                className="w-full h-12 px-4 border border-gray-300 rounded-lg text-lg bg-white"
+                disabled={isLoadingSite}
+              >
+                <option value="">-- 現場を選択 --</option>
+                {SITES.map((site) => (
+                  <option key={site.id} value={site.id}>
+                    {site.name}
+                  </option>
+                ))}
+              </select>
+              {isLoadingSite && (
+                <p className="text-sm text-blue-500 mt-1">読み込み中...</p>
+              )}
+              {tempSiteId && !isLoadingSite && (
+                <p className="text-sm text-green-600 mt-1">✓ {points.length}箇所 読み込み済み</p>
+              )}
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
                 測定者名
               </label>
               <input
@@ -497,10 +582,10 @@ export default function Home() {
             
             <button
               onClick={handleStartSession}
-              disabled={!tempOperator.trim() || !tempInstrument.trim() || tempSelectedInstruments.length === 0}
+              disabled={!tempSiteId || !tempOperator.trim() || !tempInstrument.trim() || tempSelectedInstruments.length === 0 || isLoadingSite}
               className={`
                 w-full h-14 rounded-lg text-lg font-bold mt-4
-                ${tempOperator.trim() && tempInstrument.trim() && tempSelectedInstruments.length > 0
+                ${tempSiteId && tempOperator.trim() && tempInstrument.trim() && tempSelectedInstruments.length > 0 && !isLoadingSite
                   ? 'bg-blue-500 text-white active:bg-blue-600'
                   : 'bg-gray-300 text-gray-500 cursor-not-allowed'
                 }
@@ -733,7 +818,7 @@ export default function Home() {
       <header className="bg-white shadow p-4">
         <div className="flex justify-between items-start">
           <div>
-            <h1 className="text-xl font-bold">膜厚測定記録</h1>
+            <h1 className="text-xl font-bold">{sessionInfo.siteName || '膜厚測定記録'}</h1>
             <p className="text-sm text-gray-500">
               {sessionInfo.operator}
             </p>
