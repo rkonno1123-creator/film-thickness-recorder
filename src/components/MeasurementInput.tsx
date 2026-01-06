@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import Numpad from './Numpad';
 import Gauge from './Gauge';
 import ValueList from './ValueList';
@@ -12,6 +12,7 @@ interface MeasurementInputProps {
   targetValue: number;
   lowerLimitPercent: number;
   upperLimitPercent: number;
+  instrument: string;
   onRegister: (values: number[]) => void;
   onSkip: () => void;
   onBack: () => void;
@@ -40,6 +41,7 @@ export default function MeasurementInput({
   targetValue,
   lowerLimitPercent,
   upperLimitPercent,
+  instrument,
   onRegister,
   onSkip,
   onBack,
@@ -48,6 +50,7 @@ export default function MeasurementInput({
 }: MeasurementInputProps) {
   const [values, setValues] = useState<number[]>([]);
   const [inputBuffer, setInputBuffer] = useState('');
+  const [isFullscreen, setIsFullscreen] = useState(false);
   
   const MIN_VALUES = 5;
   const MAX_VALUES = 10;
@@ -58,6 +61,29 @@ export default function MeasurementInput({
   
   const canRegister = values.length >= MIN_VALUES;
   const isFull = values.length >= MAX_VALUES;
+
+  // 全画面状態の監視
+  useEffect(() => {
+    const handleFullscreenChange = () => {
+      setIsFullscreen(!!document.fullscreenElement);
+    };
+    
+    document.addEventListener('fullscreenchange', handleFullscreenChange);
+    return () => document.removeEventListener('fullscreenchange', handleFullscreenChange);
+  }, []);
+
+  // 全画面切り替え
+  const toggleFullscreen = useCallback(async () => {
+    try {
+      if (!document.fullscreenElement) {
+        await document.documentElement.requestFullscreen();
+      } else {
+        await document.exitFullscreen();
+      }
+    } catch (err) {
+      console.error('Fullscreen error:', err);
+    }
+  }, []);
 
   // テンキー入力
   const handleInput = (digit: string) => {
@@ -109,7 +135,24 @@ export default function MeasurementInput({
           <span className={`px-3 py-1 rounded-full text-sm font-bold ${categoryColors[category]}`}>
             {categoryLabels[category]}
           </span>
-          <span className="text-sm text-gray-500">第{layerNumber}層</span>
+          <div className="flex items-center gap-2">
+            <span className="text-sm text-gray-500 bg-gray-100 px-2 py-1 rounded">{instrument}</span>
+            <button
+              onClick={toggleFullscreen}
+              className="w-10 h-10 flex items-center justify-center bg-gray-100 rounded-lg text-gray-600 active:bg-gray-200"
+              title={isFullscreen ? '全画面解除' : '全画面表示'}
+            >
+              {isFullscreen ? (
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 9L4 4m0 0v4m0-4h4m6 6l5 5m0 0v-4m0 4h-4M9 15l-5 5m0 0v-4m0 4h4m6-6l5-5m0 0v4m0-4h-4" />
+                </svg>
+              ) : (
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5v-4m0 4h-4m4 0l-5-5" />
+                </svg>
+              )}
+            </button>
+          </div>
         </div>
         <h1 className="text-xl font-bold mt-2">{pointName}</h1>
         <div className="text-sm text-gray-500 mt-1">

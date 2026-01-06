@@ -30,6 +30,7 @@ interface SavedMeasurement {
 interface SessionInfo {
   operator: string;
   instrument: string;
+  selectedInstruments: string[]; // 今日使う測定器リスト
 }
 
 // デモ用のダミーデータ
@@ -65,6 +66,9 @@ const categoryColors = {
   splice: 'bg-green-100 text-green-800',
 };
 
+// 測定器リスト
+const INSTRUMENTS = ['Pro-W', 'LZ990', 'Elcometer'] as const;
+
 // ユニークID生成
 const generateId = () => {
   return Date.now().toString(36) + Math.random().toString(36).substr(2);
@@ -78,9 +82,17 @@ export default function Home() {
   const [viewMode, setViewMode] = useState<ViewMode>('setup');
   const [currentIndex, setCurrentIndex] = useState(0);
   const [selectedPointId, setSelectedPointId] = useState<string | null>(null);
-  const [sessionInfo, setSessionInfo] = useState<SessionInfo>({ operator: '', instrument: '' });
+  const [sessionInfo, setSessionInfo] = useState<SessionInfo>({ 
+    operator: '', 
+    instrument: '',
+    selectedInstruments: [] 
+  });
   const [tempOperator, setTempOperator] = useState('');
   const [tempInstrument, setTempInstrument] = useState('');
+  const [tempSelectedInstruments, setTempSelectedInstruments] = useState<string[]>([]);
+  const [showInstrumentModal, setShowInstrumentModal] = useState(false);
+  const [pendingPointId, setPendingPointId] = useState<string | null>(null);
+  const [editingMeasurement, setEditingMeasurement] = useState<SavedMeasurement | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // ローカルストレージから読み込み
@@ -96,9 +108,13 @@ export default function Home() {
     const storedSession = localStorage.getItem('sessionInfo');
     if (storedSession) {
       const session = JSON.parse(storedSession);
-      setSessionInfo(session);
+      setSessionInfo({
+        ...session,
+        selectedInstruments: session.selectedInstruments || []
+      });
       setTempOperator(session.operator);
       setTempInstrument(session.instrument);
+      setTempSelectedInstruments(session.selectedInstruments || []);
     }
   }, []);
 
@@ -109,38 +125,70 @@ export default function Home() {
 
   const threshold = currentPoint ? thresholds[currentPoint.category] : thresholds.general;
 
-  // 現在のセッションで測定済みかチェック
-  const isMeasured = (pointId: string) => {
+  // 指定した測定器で測定済みかチェック
+  const isMeasuredWithInstrument = (pointId: string, instrument: string) => {
     return measurements.some(m => 
       m.pointId === pointId && 
       m.operator === sessionInfo.operator && 
-      m.instrument === sessionInfo.instrument
+      m.instrument === instrument
     );
+  };
+
+  // 選択した全測定器で測定完了かチェック
+  const isFullyMeasured = (pointId: string) => {
+    const targetInstruments = sessionInfo.selectedInstruments || [];
+    if (targetInstruments.length === 0) return false;
+    
+    return targetInstruments.every(instrument => 
+      isMeasuredWithInstrument(pointId, instrument)
+    );
+  };
+
+  // 測定箇所の測定状況を取得（どの測定器で測定済みか）
+  const getMeasurementStatus = (pointId: string) => {
+    const targetInstruments = sessionInfo.selectedInstruments || [];
+    const measured = targetInstruments.filter(instrument => 
+      isMeasuredWithInstrument(pointId, instrument)
+    );
+    return {
+      measured,
+      total: targetInstruments.length,
+      isComplete: measured.length === targetInstruments.length && targetInstruments.length > 0
+    };
   };
 
   // 現在のセッションの測定データを取得
   const getMeasurement = (pointId: string) => {
     return measurements.find(m => 
       m.pointId === pointId && 
-      m.operator === sessionInfo.operator && 
-      m.instrument === sessionInfo.instrument
+      m.operator === sessionInfo.operator
     );
   };
 
-  // 現在のセッションの測定数
-  const currentSessionCount = measurements.filter(m => 
-    m.operator === sessionInfo.operator && 
-    m.instrument === sessionInfo.instrument
-  ).length;
+  // 完了した箇所数
+  const completedPointsCount = points.filter(p => isFullyMeasured(p.id)).length;
 
   // 未送信データ数
   const unsyncedCount = measurements.filter(m => !m.synced).length;
 
+  // 測定器チェックボックスの切り替え
+  const handleToggleInstrument = (instrument: string) => {
+    setTempSelectedInstruments(prev => 
+      prev.includes(instrument)
+        ? prev.filter(i => i !== instrument)
+        : [...prev, instrument]
+    );
+  };
+
   // セッション開始
   const handleStartSession = () => {
-    if (!tempOperator.trim() || !tempInstrument.trim()) return;
+    if (!tempOperator.trim() || !tempInstrument.trim() || tempSelectedInstruments.length === 0) return;
     
-    const newSession = { operator: tempOperator.trim(), instrument: tempInstrument.trim() };
+    const newSession = { 
+      operator: tempOperator.trim(), 
+      instrument: tempInstrument.trim(),
+      selectedInstruments: tempSelectedInstruments
+    };
     setSessionInfo(newSession);
     localStorage.setItem('sessionInfo', JSON.stringify(newSession));
     setViewMode('list');
@@ -258,16 +306,58 @@ export default function Home() {
     localStorage.setItem('measurements', JSON.stringify(newMeasurements));
   };
 
-  // 箇所を選択して測定開始
+  // 箇所を選択して測定器選択モーダルを表示
   const handleSelectPoint = (pointId: string) => {
-    setSelectedPointId(pointId);
+    const instruments = sessionInfo.selectedInstruments || [];
+    // 選択した測定器が1つだけなら直接測定画面へ
+    if (instruments.length === 1) {
+      const instrument = instruments[0];
+      const newSession = { ...sessionInfo, instrument };
+      setSessionInfo(newSession);
+      localStorage.setItem('sessionInfo', JSON.stringify(newSession));
+      setSelectedPointId(pointId);
+      setViewMode('measure');
+    } else {
+      // 2つ以上ならモーダル表示
+      setPendingPointId(pointId);
+      setShowInstrumentModal(true);
+    }
+  };
+
+  // 測定器を選択して測定開始
+  const handleSelectInstrument = (instrument: string) => {
+    if (!pendingPointId) return;
+    
+    const newSession = { ...sessionInfo, instrument };
+    setSessionInfo(newSession);
+    localStorage.setItem('sessionInfo', JSON.stringify(newSession));
+    
+    setSelectedPointId(pendingPointId);
+    setShowInstrumentModal(false);
+    setPendingPointId(null);
     setViewMode('measure');
+  };
+
+  // モーダルを閉じる
+  const handleCloseModal = () => {
+    setShowInstrumentModal(false);
+    setPendingPointId(null);
   };
 
   // ルートモード開始
   const handleStartRoute = () => {
     setCurrentIndex(0);
     setViewMode('route');
+  };
+
+  // 測定器変更
+  const handleChangeInstrument = (measurementId: string, newInstrument: string) => {
+    const newMeasurements = measurements.map(m => 
+      m.id === measurementId ? { ...m, instrument: newInstrument } : m
+    );
+    setMeasurements(newMeasurements);
+    localStorage.setItem('measurements', JSON.stringify(newMeasurements));
+    setEditingMeasurement(null);
   };
 
   // クラウド送信（Firestoreに追記）
@@ -363,7 +453,7 @@ export default function Home() {
             
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
-                測定器名
+                測定器名（メモ用）
               </label>
               <input
                 type="text"
@@ -373,13 +463,44 @@ export default function Home() {
                 className="w-full h-12 px-4 border border-gray-300 rounded-lg text-lg"
               />
             </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                今日使う測定器を選択
+              </label>
+              <div className="space-y-2">
+                {INSTRUMENTS.map((instrument) => (
+                  <label
+                    key={instrument}
+                    className={`
+                      flex items-center p-3 rounded-lg border-2 cursor-pointer transition-all
+                      ${tempSelectedInstruments.includes(instrument)
+                        ? 'border-blue-500 bg-blue-50'
+                        : 'border-gray-200 bg-white'
+                      }
+                    `}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={tempSelectedInstruments.includes(instrument)}
+                      onChange={() => handleToggleInstrument(instrument)}
+                      className="w-5 h-5 text-blue-500 rounded"
+                    />
+                    <span className="ml-3 font-medium">{instrument}</span>
+                  </label>
+                ))}
+              </div>
+              {tempSelectedInstruments.length === 0 && (
+                <p className="text-sm text-red-500 mt-1">※ 1つ以上選択してください</p>
+              )}
+            </div>
             
             <button
               onClick={handleStartSession}
-              disabled={!tempOperator.trim() || !tempInstrument.trim()}
+              disabled={!tempOperator.trim() || !tempInstrument.trim() || tempSelectedInstruments.length === 0}
               className={`
                 w-full h-14 rounded-lg text-lg font-bold mt-4
-                ${tempOperator.trim() && tempInstrument.trim()
+                ${tempOperator.trim() && tempInstrument.trim() && tempSelectedInstruments.length > 0
                   ? 'bg-blue-500 text-white active:bg-blue-600'
                   : 'bg-gray-300 text-gray-500 cursor-not-allowed'
                 }
@@ -413,7 +534,7 @@ export default function Home() {
             <div>
               <h1 className="text-xl font-bold">測定結果</h1>
               <p className="text-sm text-gray-500">
-                {sessionInfo.operator} / {sessionInfo.instrument}
+                {sessionInfo.operator}
               </p>
             </div>
             <button
@@ -437,7 +558,10 @@ export default function Home() {
           
           <div className="space-y-2 max-h-60 overflow-auto">
             {measurements.map((m) => (
-              <div key={m.id} className={`p-3 rounded flex justify-between items-start ${m.synced ? 'bg-green-50' : 'bg-gray-50'}`}>
+              <div 
+                key={m.id} 
+                className={`p-3 rounded flex justify-between items-start ${m.synced ? 'bg-green-50' : 'bg-gray-50'}`}
+              >
                 <div className="flex-1">
                   <div className="font-medium flex items-center gap-2">
                     {m.pointName}
@@ -450,14 +574,24 @@ export default function Home() {
                     平均: {m.average.toFixed(1)}μm ({m.values.length}点)
                   </div>
                 </div>
-                {!m.synced && (
-                  <button
-                    onClick={() => handleDeleteMeasurement(m.id)}
-                    className="text-red-400 text-sm px-2"
-                  >
-                    削除
-                  </button>
-                )}
+                <div className="flex gap-1">
+                  {!m.synced && (
+                    <>
+                      <button
+                        onClick={() => setEditingMeasurement(m)}
+                        className="text-blue-400 text-sm px-2"
+                      >
+                        変更
+                      </button>
+                      <button
+                        onClick={() => handleDeleteMeasurement(m.id)}
+                        className="text-red-400 text-sm px-2"
+                      >
+                        削除
+                      </button>
+                    </>
+                  )}
+                </div>
               </div>
             ))}
           </div>
@@ -502,6 +636,48 @@ export default function Home() {
             ローカルデータを削除
           </button>
         </div>
+
+        {/* 測定器変更モーダル */}
+        {editingMeasurement && (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+            <div className="bg-white rounded-lg shadow-xl w-full max-w-sm">
+              <div className="p-4 border-b">
+                <h2 className="text-lg font-bold">測定器を変更</h2>
+                <p className="text-sm text-gray-500 mt-1">
+                  {editingMeasurement.pointName}
+                </p>
+                <p className="text-xs text-gray-400">
+                  現在: {editingMeasurement.instrument}
+                </p>
+              </div>
+              <div className="p-4 space-y-2">
+                {INSTRUMENTS.map((instrument) => (
+                  <button
+                    key={instrument}
+                    onClick={() => handleChangeInstrument(editingMeasurement.id, instrument)}
+                    className={`
+                      w-full h-14 rounded-lg font-bold text-lg
+                      ${instrument === editingMeasurement.instrument
+                        ? 'bg-gray-300 text-gray-500'
+                        : 'bg-blue-500 text-white active:bg-blue-600'
+                      }
+                    `}
+                  >
+                    {instrument}
+                  </button>
+                ))}
+              </div>
+              <div className="p-4 border-t">
+                <button
+                  onClick={() => setEditingMeasurement(null)}
+                  className="w-full h-12 bg-gray-200 text-gray-700 rounded-lg font-bold"
+                >
+                  キャンセル
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     );
   }
@@ -540,6 +716,7 @@ export default function Home() {
           targetValue={threshold.target}
           lowerLimitPercent={threshold.lower}
           upperLimitPercent={threshold.upper}
+          instrument={sessionInfo.instrument}
           onRegister={handleRegister}
           onSkip={handleSkip}
           onBack={handleBack}
@@ -558,7 +735,10 @@ export default function Home() {
           <div>
             <h1 className="text-xl font-bold">膜厚測定記録</h1>
             <p className="text-sm text-gray-500">
-              {sessionInfo.operator} / {sessionInfo.instrument}
+              {sessionInfo.operator}
+            </p>
+            <p className="text-xs text-gray-400">
+              使用測定器: {(sessionInfo.selectedInstruments || []).join(', ')}
             </p>
           </div>
           <button
@@ -569,7 +749,7 @@ export default function Home() {
           </button>
         </div>
         <p className="text-sm text-gray-500 mt-2">
-          このセッション: {currentSessionCount} / {points.length} 箇所
+          完了: {completedPointsCount} / {points.length} 箇所
           {unsyncedCount > 0 && (
             <span className="text-orange-500 ml-2">（未送信: {unsyncedCount}件）</span>
           )}
@@ -612,8 +792,7 @@ export default function Home() {
         <h2 className="text-sm font-bold text-gray-600 mb-2">測定箇所一覧</h2>
         <div className="space-y-2 max-h-[55vh] overflow-auto">
           {points.map((point) => {
-            const measured = isMeasured(point.id);
-            const measurement = getMeasurement(point.id);
+            const status = getMeasurementStatus(point.id);
             
             return (
               <button
@@ -621,7 +800,7 @@ export default function Home() {
                 onClick={() => handleSelectPoint(point.id)}
                 className={`
                   w-full p-3 rounded-lg text-left flex items-center justify-between
-                  ${measured ? 'bg-green-50 border border-green-200' : 'bg-white border border-gray-200'}
+                  ${status.isComplete ? 'bg-green-50 border border-green-200' : 'bg-white border border-gray-200'}
                 `}
               >
                 <div>
@@ -630,15 +809,25 @@ export default function Home() {
                     <span className={`px-2 py-0.5 rounded text-xs font-bold ${categoryColors[point.category]}`}>
                       {categoryLabels[point.category]}
                     </span>
-                    {measured && measurement && (
+                    {status.total > 0 && (
                       <span className="text-xs text-gray-500">
-                        {measurement.average.toFixed(1)}μm
+                        {status.measured.length}/{status.total}台
                       </span>
                     )}
                   </div>
+                  {/* 測定済み測定器の表示 */}
+                  {status.measured.length > 0 && (
+                    <div className="flex gap-1 mt-1">
+                      {status.measured.map(inst => (
+                        <span key={inst} className="text-xs bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded">
+                          {inst}
+                        </span>
+                      ))}
+                    </div>
+                  )}
                 </div>
                 <div className="flex items-center gap-2">
-                  {measured && (
+                  {status.isComplete && (
                     <span className="text-green-500 text-xl">✓</span>
                   )}
                   <span className="text-gray-400">›</span>
@@ -648,6 +837,49 @@ export default function Home() {
           })}
         </div>
       </div>
+
+      {/* 測定器選択モーダル */}
+      {showInstrumentModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-lg shadow-xl w-full max-w-sm">
+            <div className="p-4 border-b">
+              <h2 className="text-lg font-bold">測定器を選択</h2>
+              <p className="text-sm text-gray-500 mt-1">
+                {points.find(p => p.id === pendingPointId)?.name}
+              </p>
+            </div>
+            <div className="p-4 space-y-2">
+              {(sessionInfo.selectedInstruments || []).map((instrument) => {
+                const alreadyMeasured = pendingPointId ? isMeasuredWithInstrument(pendingPointId, instrument) : false;
+                return (
+                  <button
+                    key={instrument}
+                    onClick={() => handleSelectInstrument(instrument)}
+                    className={`
+                      w-full h-14 rounded-lg font-bold text-lg flex items-center justify-center gap-2
+                      ${alreadyMeasured 
+                        ? 'bg-green-100 text-green-700 border-2 border-green-300' 
+                        : 'bg-blue-500 text-white active:bg-blue-600'
+                      }
+                    `}
+                  >
+                    {instrument}
+                    {alreadyMeasured && <span className="text-sm">（測定済）</span>}
+                  </button>
+                );
+              })}
+            </div>
+            <div className="p-4 border-t">
+              <button
+                onClick={handleCloseModal}
+                className="w-full h-12 bg-gray-200 text-gray-700 rounded-lg font-bold"
+              >
+                キャンセル
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
