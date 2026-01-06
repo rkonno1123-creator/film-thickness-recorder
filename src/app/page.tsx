@@ -38,6 +38,7 @@ interface SessionInfo {
 // 現場リスト
 const SITES = [
   { id: 'maedagawa-nobori', name: '前田川 上り', file: '/sites/maedagawa-nobori.csv' },
+  { id: 'maedagawa-kudari', name: '前田川 下り', file: '/sites/maedagawa-kudari.csv' },
   // { id: 'maedagawa-kudari', name: '前田川 下り', file: '/sites/maedagawa-kudari.csv' },
 ] as const;
 
