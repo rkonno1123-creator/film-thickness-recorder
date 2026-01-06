@@ -25,7 +25,6 @@ export default function Gauge({ value, targetValue, lowerLimitPercent, upperLimi
   // 判定
   const isInRange = value >= lowerLimit && value <= upperLimit;
   const isLow = value < lowerLimit;
-  const isHigh = value > upperLimit;
   
   const getStatusColor = () => {
     if (value === 0) return 'bg-gray-400';
@@ -33,30 +32,11 @@ export default function Gauge({ value, targetValue, lowerLimitPercent, upperLimi
     if (isLow) return 'bg-blue-500';
     return 'bg-red-500';
   };
-  
-  const getStatusText = () => {
-    if (value === 0) return '-';
-    if (isInRange) return '適正';
-    if (isLow) return '低い';
-    return '高い';
-  };
 
   return (
-    <div className="w-full p-4 bg-white rounded-lg shadow">
-      {/* 現在値と判定 */}
-      <div className="flex justify-between items-center mb-2">
-        <span className="text-sm text-gray-600">平均値</span>
-        <div className="flex items-center gap-2">
-          <span className="text-2xl font-bold">{value > 0 ? value.toFixed(1) : '-'}</span>
-          <span className="text-sm text-gray-500">μm</span>
-          <span className={`px-2 py-1 text-xs font-bold text-white rounded ${getStatusColor()}`}>
-            {getStatusText()}
-          </span>
-        </div>
-      </div>
-      
+    <div className="w-full">
       {/* ゲージバー */}
-      <div className="relative h-8 bg-gray-200 rounded-full overflow-hidden">
+      <div className="relative h-6 bg-gray-200 rounded-full overflow-hidden">
         {/* 適正範囲 */}
         <div 
           className="absolute h-full bg-green-200"

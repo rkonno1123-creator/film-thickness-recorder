@@ -129,63 +129,79 @@ export default function MeasurementInput({
 
   return (
     <div className="min-h-screen bg-gray-100 flex flex-col">
-      {/* ヘッダー */}
-      <header className="bg-white shadow p-4">
+      {/* ヘッダー（コンパクト） */}
+      <header className="bg-white shadow px-4 py-2">
         <div className="flex justify-between items-center">
-          <span className={`px-3 py-1 rounded-full text-sm font-bold ${categoryColors[category]}`}>
-            {categoryLabels[category]}
-          </span>
           <div className="flex items-center gap-2">
-            <span className="text-sm text-gray-500 bg-gray-100 px-2 py-1 rounded">{instrument}</span>
+            <span className={`px-2 py-0.5 rounded-full text-xs font-bold ${categoryColors[category]}`}>
+              {categoryLabels[category]}
+            </span>
+            <span className="font-bold text-base truncate max-w-[180px]">{pointName}</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-gray-500 bg-gray-100 px-2 py-1 rounded">{instrument}</span>
             <button
               onClick={toggleFullscreen}
-              className="w-10 h-10 flex items-center justify-center bg-gray-100 rounded-lg text-gray-600 active:bg-gray-200"
+              className="w-8 h-8 flex items-center justify-center bg-gray-100 rounded-lg text-gray-600 active:bg-gray-200"
               title={isFullscreen ? '全画面解除' : '全画面表示'}
             >
               {isFullscreen ? (
-                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 9L4 4m0 0v4m0-4h4m6 6l5 5m0 0v-4m0 4h-4M9 15l-5 5m0 0v-4m0 4h4m6-6l5-5m0 0v4m0-4h-4" />
                 </svg>
               ) : (
-                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5v-4m0 4h-4m4 0l-5-5" />
                 </svg>
               )}
             </button>
           </div>
         </div>
-        <h1 className="text-xl font-bold mt-2">{pointName}</h1>
-        <div className="text-sm text-gray-500 mt-1">
-          狙い値: {targetValue}μm
-        </div>
       </header>
 
       {/* メインコンテンツ */}
-      <main className="flex-1 p-4 space-y-4 overflow-auto">
-        {/* ゲージ */}
-        <Gauge
-          value={average}
-          targetValue={targetValue}
-          lowerLimitPercent={lowerLimitPercent}
-          upperLimitPercent={upperLimitPercent}
-        />
-        
-        {/* 測定値リスト */}
-        <ValueList
-          values={values}
-          onDelete={handleDeleteValue}
-          maxValues={MAX_VALUES}
-          minValues={MIN_VALUES}
-        />
-        
-        {/* 入力中の値表示 */}
-        <div className="bg-white rounded-lg shadow p-4">
-          <div className="text-center">
-            <span className="text-sm text-gray-500">入力中</span>
-            <div className="text-4xl font-bold h-12 flex items-center justify-center">
-              {inputBuffer || <span className="text-gray-300">---</span>}
+      <main className="flex-1 p-3 space-y-3 overflow-auto">
+        {/* ゲージ（コンパクト版） */}
+        <div className="bg-white rounded-lg shadow p-3">
+          <div className="flex justify-between items-center mb-2">
+            <span className="text-xs text-gray-500">狙い: {targetValue}μm</span>
+            <div className="flex items-center gap-2">
+              <span className="text-xl font-bold">{average > 0 ? average.toFixed(1) : '-'}</span>
+              <span className="text-xs text-gray-500">μm</span>
+              <span className={`px-2 py-0.5 text-xs font-bold text-white rounded ${
+                average === 0 ? 'bg-gray-400' :
+                average >= targetValue * (lowerLimitPercent / 100) && average <= targetValue * (upperLimitPercent / 100) ? 'bg-green-500' :
+                average < targetValue * (lowerLimitPercent / 100) ? 'bg-blue-500' : 'bg-red-500'
+              }`}>
+                {average === 0 ? '-' : 
+                 average >= targetValue * (lowerLimitPercent / 100) && average <= targetValue * (upperLimitPercent / 100) ? '適正' :
+                 average < targetValue * (lowerLimitPercent / 100) ? '低い' : '高い'}
+              </span>
             </div>
-            <span className="text-sm text-gray-500">μm</span>
+          </div>
+          <Gauge
+            value={average}
+            targetValue={targetValue}
+            lowerLimitPercent={lowerLimitPercent}
+            upperLimitPercent={upperLimitPercent}
+          />
+        </div>
+        
+        {/* 入力中の値表示 + カウント */}
+        <div className="bg-white rounded-lg shadow p-3">
+          <div className="flex justify-between items-center">
+            <div className="text-center flex-1">
+              <div className="text-3xl font-bold h-10 flex items-center justify-center">
+                {inputBuffer || <span className="text-gray-300">---</span>}
+              </div>
+              <span className="text-xs text-gray-500">μm</span>
+            </div>
+            <div className="text-right">
+              <div className="text-lg font-bold text-blue-600">{values.length}/{MAX_VALUES}</div>
+              <span className="text-xs text-gray-500">
+                {values.length < MIN_VALUES ? `あと${MIN_VALUES - values.length}点` : '登録可'}
+              </span>
+            </div>
           </div>
         </div>
         
@@ -197,29 +213,37 @@ export default function MeasurementInput({
           onConfirm={handleConfirm}
           disabled={isFull}
         />
+
+        {/* 測定値リスト（下に移動） */}
+        <ValueList
+          values={values}
+          onDelete={handleDeleteValue}
+          maxValues={MAX_VALUES}
+          minValues={MIN_VALUES}
+        />
       </main>
 
-      {/* フッター（ナビゲーション） */}
-      <footer className="bg-white shadow-lg p-4 space-y-2">
+      {/* フッター（コンパクト） */}
+      <footer className="bg-white shadow-lg p-3 space-y-2">
         <button
           onClick={handleRegister}
           disabled={!canRegister}
           className={`
-            w-full h-14 rounded-lg text-lg font-bold
+            w-full h-12 rounded-lg text-lg font-bold
             ${canRegister 
               ? 'bg-green-500 text-white active:bg-green-600' 
               : 'bg-gray-300 text-gray-500 cursor-not-allowed'
             }
           `}
         >
-          登録して次へ
+          登録して次へ ({values.length}点)
         </button>
         <div className="flex gap-2">
           <button
             onClick={onBack}
             disabled={!canGoBack}
             className={`
-              flex-1 h-12 rounded-lg font-bold
+              flex-1 h-10 rounded-lg font-bold text-sm
               ${canGoBack 
                 ? 'bg-gray-200 text-gray-700 active:bg-gray-300' 
                 : 'bg-gray-100 text-gray-400 cursor-not-allowed'
@@ -230,17 +254,17 @@ export default function MeasurementInput({
           </button>
           <button
             onClick={onSkip}
-            className="flex-1 h-12 rounded-lg font-bold bg-gray-200 text-gray-700 active:bg-gray-300"
+            className="flex-1 h-10 rounded-lg font-bold text-sm bg-gray-200 text-gray-700 active:bg-gray-300"
           >
             スキップ
           </button>
+          <button
+            onClick={onFinish}
+            className="flex-1 h-10 rounded-lg font-bold text-sm bg-orange-100 text-orange-700 active:bg-orange-200"
+          >
+            終了
+          </button>
         </div>
-        <button
-          onClick={onFinish}
-          className="w-full h-10 rounded-lg font-bold text-sm bg-orange-100 text-orange-700 active:bg-orange-200"
-        >
-          測定を終了する
-        </button>
       </footer>
     </div>
   );
