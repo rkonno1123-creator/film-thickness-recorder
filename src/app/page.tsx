@@ -105,8 +105,10 @@ export default function Home() {
   const [isLoadingSite, setIsLoadingSite] = useState(false);
   const [isAdditionalMode, setIsAdditionalMode] = useState(false);
   const [lastMeasuredPointId, setLastMeasuredPointId] = useState<string | null>(null);
-  const [savedScrollPosition, setSavedScrollPosition] = useState(0); // スクロール位置保存
-  const listContainerRef = useRef<HTMLDivElement>(null); // リストコンテナの参照
+  
+  // スクロール位置保存用（useRefで保持）
+  const savedScrollPositionRef = useRef(0);
+  const shouldRestoreScrollRef = useRef(false);
 
   // ローカルストレージから読み込み
   useEffect(() => {
@@ -134,26 +136,29 @@ export default function Home() {
     }
   }, []);
 
-  // リストに戻った時のスクロール処理
+  // リストに戻った時のスクロール復元
   useEffect(() => {
-    if (viewMode === 'list' && listContainerRef.current) {
+    if (viewMode === 'list') {
       // 少し遅延させてDOMが更新されてからスクロール
-      setTimeout(() => {
-        if (listContainerRef.current) {
-          // 最後に測定した箇所があればそこへ、なければ保存位置へ
+      const timer = setTimeout(() => {
+        const listContainer = document.getElementById('point-list-container');
+        if (listContainer) {
           if (lastMeasuredPointId) {
+            // 登録後：測定した箇所へスクロール
             const element = document.getElementById(`point-${lastMeasuredPointId}`);
             if (element) {
               element.scrollIntoView({ behavior: 'smooth', block: 'center' });
-              return;
             }
+          } else if (shouldRestoreScrollRef.current) {
+            // 戻るボタン：保存した位置へ復元
+            listContainer.scrollTop = savedScrollPositionRef.current;
           }
-          // 保存したスクロール位置を復元
-          listContainerRef.current.scrollTop = savedScrollPosition;
+          shouldRestoreScrollRef.current = false;
         }
-      }, 100);
+      }, 50);
+      return () => clearTimeout(timer);
     }
-  }, [viewMode, lastMeasuredPointId, savedScrollPosition]);
+  }, [viewMode, lastMeasuredPointId]);
 
   const currentPoint = viewMode === 'measure' && selectedPointId
     ? points.find(p => p.id === selectedPointId)
@@ -218,22 +223,22 @@ export default function Home() {
     );
   };
 
-  // 次の未測定箇所を取得
-  const getNextUnmeasuredPoint = (currentPointId: string) => {
+  // 次の未測定箇所のIDを取得
+  const getNextUnmeasuredPointId = (currentPointId: string): string | null => {
     const currentIdx = points.findIndex(p => p.id === currentPointId);
     if (currentIdx === -1) return null;
 
     // 現在位置より後ろで未測定の箇所を探す
     for (let i = currentIdx + 1; i < points.length; i++) {
       if (!isFullyMeasured(points[i].id)) {
-        return points[i];
+        return points[i].id;
       }
     }
     
     // 見つからなければ最初から探す
     for (let i = 0; i < currentIdx; i++) {
       if (!isFullyMeasured(points[i].id)) {
-        return points[i];
+        return points[i].id;
       }
     }
     
@@ -313,40 +318,6 @@ export default function Home() {
     setViewMode('list');
   };
 
-  const handleCSVImport = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      const text = event.target?.result as string;
-      const lines = text.split('\n').filter(line => line.trim());
-      
-      const dataLines = lines[0].includes('id') || lines[0].includes('name') 
-        ? lines.slice(1) 
-        : lines;
-      
-      const newPoints: MeasurementPoint[] = dataLines
-        .filter(line => {
-          const cols = line.split(',').map(col => col.trim());
-          return cols[0] && cols[1];
-        })
-        .map((line, index) => {
-          const cols = line.split(',').map(col => col.trim());
-          return {
-            id: cols[0] || String(index + 1),
-            name: cols[1] || cols[0],
-            category: (cols[2] as MeasurementPoint['category']) || 'general',
-            routeOrder: parseInt(cols[3]) || index + 1,
-          };
-        });
-
-      setPoints(newPoints);
-      localStorage.setItem('measurementPoints', JSON.stringify(newPoints));
-    };
-    reader.readAsText(file);
-  };
-
   const handleRegister = (values: number[], memo: string) => {
     if (!currentPoint) return;
     
@@ -371,6 +342,7 @@ export default function Home() {
     localStorage.setItem('measurements', JSON.stringify(newMeasurements));
 
     setLastMeasuredPointId(currentPoint.id);
+    shouldRestoreScrollRef.current = false; // 登録後は測定箇所へスクロール
 
     if (viewMode === 'route') {
       if (currentIndex < points.length - 1) {
@@ -384,7 +356,7 @@ export default function Home() {
     }
   };
 
-  // スキップ（個別モード：次の未測定箇所へ）
+  // スキップ
   const handleSkip = () => {
     if (viewMode === 'route') {
       // ルートモード：次のインデックスへ
@@ -396,32 +368,49 @@ export default function Home() {
     } else {
       // 個別選択モード：次の未測定箇所へ
       if (selectedPointId) {
-        const nextPoint = getNextUnmeasuredPoint(selectedPointId);
-        if (nextPoint) {
-          // 次の未測定箇所がある → そこへ移動（測定器選択）
-          setLastMeasuredPointId(selectedPointId);
-          handleSelectPoint(nextPoint.id);
+        const nextPointId = getNextUnmeasuredPointId(selectedPointId);
+        if (nextPointId) {
+          // 次の未測定箇所がある → 直接そこへ移動
+          const instruments = sessionInfo.selectedInstruments || [];
+          
+          if (instruments.length === 1) {
+            // 1台 → 直接測定画面へ
+            const instrument = instruments[0];
+            setSessionInfo(prev => ({ ...prev, instrument }));
+            localStorage.setItem('sessionInfo', JSON.stringify({ ...sessionInfo, instrument }));
+            setSelectedPointId(nextPointId);
+            // viewMode は 'measure' のまま
+          } else {
+            // 2台以上 → モーダル表示
+            setPendingPointId(nextPointId);
+            setShowInstrumentModal(true);
+          }
         } else {
           // 全部測定済み → リストに戻る
+          shouldRestoreScrollRef.current = true;
+          setLastMeasuredPointId(null);
           setViewMode('list');
           setSelectedPointId(null);
         }
       } else {
+        shouldRestoreScrollRef.current = true;
+        setLastMeasuredPointId(null);
         setViewMode('list');
         setSelectedPointId(null);
       }
     }
   };
 
-  // 戻る（スクロール位置復元のためリストへ）
+  // 戻る
   const handleBack = () => {
     if (viewMode === 'route' && currentIndex > 0) {
       setCurrentIndex(prev => prev - 1);
     } else {
-      // リストに戻る（スクロール位置は保存済み）
+      // リストに戻る（スクロール位置を復元）
+      shouldRestoreScrollRef.current = true;
+      setLastMeasuredPointId(null); // 戻る時は最後の測定箇所へのスクロールをしない
       setViewMode('list');
       setSelectedPointId(null);
-      setLastMeasuredPointId(null); // 戻る時は最後の測定箇所へのスクロールをしない
     }
   };
 
@@ -447,8 +436,9 @@ export default function Home() {
   // 箇所選択（スクロール位置を保存してから）
   const handleSelectPoint = (pointId: string) => {
     // スクロール位置を保存
-    if (listContainerRef.current) {
-      setSavedScrollPosition(listContainerRef.current.scrollTop);
+    const listContainer = document.getElementById('point-list-container');
+    if (listContainer) {
+      savedScrollPositionRef.current = listContainer.scrollTop;
     }
 
     const instruments = sessionInfo.selectedInstruments || [];
@@ -972,7 +962,7 @@ export default function Home() {
           {isAdditionalMode ? '追加測定する箇所を選択（測定器を必ず選択）' : '測定箇所一覧'}
         </h2>
         <div 
-          ref={listContainerRef}
+          id="point-list-container"
           className="space-y-2 max-h-[55vh] overflow-auto"
         >
           {points
