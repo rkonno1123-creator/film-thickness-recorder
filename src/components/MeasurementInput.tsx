@@ -18,7 +18,7 @@ interface MeasurementInputProps {
   onBack: () => void;
   onFinish: () => void;
   canGoBack: boolean;
-  isAdditionalMode?: boolean; // 追加測定モードか
+  isAdditionalMode?: boolean;
 }
 
 const categoryLabels = {
@@ -64,6 +64,8 @@ export default function MeasurementInput({
   
   const canRegister = values.length >= MIN_VALUES;
   const isFull = values.length >= MAX_VALUES;
+  const hasData = values.length > 0;
+  const needMorePoints = MIN_VALUES - values.length;
 
   // 全画面状態の監視
   useEffect(() => {
@@ -131,16 +133,54 @@ export default function MeasurementInput({
     }
   };
 
-  // スキップ時の警告（5点未満で登録しようとした場合）
-  const handleSkipClick = () => {
-    if (values.length > 0 && values.length < MIN_VALUES) {
-      // 値が入力されてるけど5点未満 → 確認
-      if (confirm(`${values.length}点入力済みですが、登録せずにスキップしますか？\n（5点以上でないと登録できません）`)) {
-        onSkip();
+  // ページ離脱時の確認（データ入力中の場合）
+  const confirmLeave = (action: () => void, actionName: string) => {
+    if (!hasData) {
+      // データなし → そのまま実行
+      action();
+      return;
+    }
+
+    // データあり → 登録するか確認
+    const wantToSave = confirm(`${values.length}点のデータがあります。登録しますか？\n\n[OK] → 登録を試みる\n[キャンセル] → データを破棄して${actionName}`);
+    
+    if (wantToSave) {
+      // 登録したい
+      if (canRegister) {
+        // 5点以上 → 登録して移動
+        onRegister(values, memo);
+        setValues([]);
+        setInputBuffer('');
+        setMemo('');
+        // 登録後は移動しない（onRegister内で移動処理される）
+      } else {
+        // 5点未満 → 登録できない
+        alert(`あと${needMorePoints}点測定してください。\n（最低5点必要です）`);
+        // 何もしない（画面にとどまる）
       }
     } else {
-      onSkip();
+      // 破棄して移動
+      setValues([]);
+      setInputBuffer('');
+      setMemo('');
+      action();
     }
+  };
+
+  // スキップ
+  const handleSkipClick = () => {
+    confirmLeave(onSkip, 'スキップ');
+  };
+
+  // 戻る
+  const handleBackClick = () => {
+    if (!canGoBack) return;
+    confirmLeave(onBack, '戻る');
+  };
+
+  // 終了
+  const handleFinishClick = () => {
+    confirmLeave(onFinish, '終了');
   };
 
   return (
@@ -220,7 +260,7 @@ export default function MeasurementInput({
             <div className="text-right">
               <div className="text-lg font-bold text-blue-600">{values.length}/{MAX_VALUES}</div>
               <span className="text-xs text-gray-500">
-                {values.length < MIN_VALUES ? `あと${MIN_VALUES - values.length}点` : '登録可'}
+                {values.length < MIN_VALUES ? `あと${needMorePoints}点` : '登録可'}
               </span>
             </div>
           </div>
@@ -275,7 +315,7 @@ export default function MeasurementInput({
         </button>
         <div className="flex gap-2">
           <button
-            onClick={onBack}
+            onClick={handleBackClick}
             disabled={!canGoBack}
             className={`
               flex-1 h-10 rounded-lg font-bold text-sm
@@ -294,7 +334,7 @@ export default function MeasurementInput({
             スキップ
           </button>
           <button
-            onClick={onFinish}
+            onClick={handleFinishClick}
             className="flex-1 h-10 rounded-lg font-bold text-sm bg-orange-100 text-orange-700 active:bg-orange-200"
           >
             終了
