@@ -67,6 +67,14 @@ export default function MeasurementInput({
   const hasData = values.length > 0;
   const needMorePoints = MIN_VALUES - values.length;
 
+  // 測定箇所が変わったら画面を一番上にスクロール & 入力をリセット
+  useEffect(() => {
+    window.scrollTo(0, 0);
+    setValues([]);
+    setInputBuffer('');
+    setMemo('');
+  }, [pointName]);
+
   // 全画面状態の監視
   useEffect(() => {
     const handleFullscreenChange = () => {
@@ -127,9 +135,7 @@ export default function MeasurementInput({
   const handleRegister = () => {
     if (canRegister) {
       onRegister(values, memo);
-      setValues([]);
-      setInputBuffer('');
-      setMemo('');
+      // リセットはuseEffect[pointName]で行う
     }
   };
 
@@ -149,10 +155,7 @@ export default function MeasurementInput({
       if (canRegister) {
         // 5点以上 → 登録して移動
         onRegister(values, memo);
-        setValues([]);
-        setInputBuffer('');
-        setMemo('');
-        // 登録後は移動しない（onRegister内で移動処理される）
+        // リセットはuseEffect[pointName]で行う
       } else {
         // 5点未満 → 登録できない
         alert(`あと${needMorePoints}点測定してください。\n（最低5点必要です）`);
