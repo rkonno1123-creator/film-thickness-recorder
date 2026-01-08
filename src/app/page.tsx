@@ -38,7 +38,6 @@ interface SessionInfo {
 // 現場リスト
 const SITES = [
   { id: 'maedagawa-nobori', name: '前田川 上り', file: '/sites/maedagawa-nobori.csv' },
-  { id: 'maedagawa-kudari', name: '前田川 下り', file: '/sites/maedagawa-kudari.csv' },
   // { id: 'maedagawa-kudari', name: '前田川 下り', file: '/sites/maedagawa-kudari.csv' },
 ] as const;
 
@@ -106,7 +105,7 @@ export default function Home() {
   const [pendingPointId, setPendingPointId] = useState<string | null>(null);
   const [editingMeasurement, setEditingMeasurement] = useState<SavedMeasurement | null>(null);
   const [isLoadingSite, setIsLoadingSite] = useState(false);
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [isAdditionalMode, setIsAdditionalMode] = useState(false); // 追加測定モード
 
   // ローカルストレージから読み込み
   useEffect(() => {
@@ -173,6 +172,38 @@ export default function Home() {
     };
   };
 
+  // 追加データの数を取得（同じ測定器で2回以上測定した分）
+  const getAdditionalCount = (pointId: string) => {
+    const pointMeasurements = measurements.filter(m => 
+      m.pointId === pointId && 
+      m.operator === sessionInfo.operator
+    );
+    
+    // 測定器ごとにカウント
+    const byInstrument: Record<string, number> = {};
+    pointMeasurements.forEach(m => {
+      byInstrument[m.instrument] = (byInstrument[m.instrument] || 0) + 1;
+    });
+    
+    // 各測定器で2回目以降の分を合計
+    let additionalCount = 0;
+    Object.values(byInstrument).forEach(count => {
+      if (count > 1) {
+        additionalCount += count - 1;
+      }
+    });
+    
+    return additionalCount;
+  };
+
+  // その箇所が測定済みか（追加測定モード用）
+  const hasMeasurement = (pointId: string) => {
+    return measurements.some(m => 
+      m.pointId === pointId && 
+      m.operator === sessionInfo.operator
+    );
+  };
+
   // 現在のセッションの測定データを取得
   const getMeasurement = (pointId: string) => {
     return measurements.find(m => 
@@ -218,15 +249,20 @@ export default function Home() {
         ? lines.slice(1) 
         : lines;
       
-      const newPoints: MeasurementPoint[] = dataLines.map((line, index) => {
-        const cols = line.split(',').map(col => col.trim());
-        return {
-          id: cols[0] || String(index + 1),
-          name: cols[1] || cols[0],
-          category: (cols[2] as MeasurementPoint['category']) || 'general',
-          routeOrder: parseInt(cols[3]) || index + 1,
-        };
-      });
+      const newPoints: MeasurementPoint[] = dataLines
+        .filter(line => {
+          const cols = line.split(',').map(col => col.trim());
+          return cols[0] && cols[1]; // idとnameが両方あること
+        })
+        .map((line, index) => {
+          const cols = line.split(',').map(col => col.trim());
+          return {
+            id: cols[0] || String(index + 1),
+            name: cols[1] || cols[0],
+            category: (cols[2] as MeasurementPoint['category']) || 'general',
+            routeOrder: parseInt(cols[3]) || index + 1,
+          };
+        });
 
       setPoints(newPoints);
       localStorage.setItem('measurementPoints', JSON.stringify(newPoints));
@@ -269,15 +305,20 @@ export default function Home() {
         ? lines.slice(1) 
         : lines;
       
-      const newPoints: MeasurementPoint[] = dataLines.map((line, index) => {
-        const cols = line.split(',').map(col => col.trim());
-        return {
-          id: cols[0] || String(index + 1),
-          name: cols[1] || cols[0],
-          category: (cols[2] as MeasurementPoint['category']) || 'general',
-          routeOrder: parseInt(cols[3]) || index + 1,
-        };
-      });
+      const newPoints: MeasurementPoint[] = dataLines
+        .filter(line => {
+          const cols = line.split(',').map(col => col.trim());
+          return cols[0] && cols[1]; // idとnameが両方あること
+        })
+        .map((line, index) => {
+          const cols = line.split(',').map(col => col.trim());
+          return {
+            id: cols[0] || String(index + 1),
+            name: cols[1] || cols[0],
+            category: (cols[2] as MeasurementPoint['category']) || 'general',
+            routeOrder: parseInt(cols[3]) || index + 1,
+          };
+        });
 
       setPoints(newPoints);
       localStorage.setItem('measurementPoints', JSON.stringify(newPoints));
@@ -843,84 +884,99 @@ export default function Home() {
       </header>
 
       <div className="p-4 space-y-2">
-        <button
-          onClick={handleStartRoute}
-          className="w-full h-14 bg-blue-500 text-white rounded-lg font-bold flex items-center justify-center gap-2"
-        >
-          <span>▶</span> ルートモードで測定開始
-        </button>
-        
-        <div className="flex gap-2">
+        {!isAdditionalMode ? (
+          <>
+            <button
+              onClick={handleStartRoute}
+              className="w-full h-14 bg-blue-500 text-white rounded-lg font-bold flex items-center justify-center gap-2"
+            >
+              <span>▶</span> ルートモードで測定開始
+            </button>
+            
+            <div className="flex gap-2">
+              <button
+                onClick={() => setIsAdditionalMode(true)}
+                className="flex-1 h-12 bg-orange-100 text-orange-700 rounded-lg font-bold text-sm"
+              >
+                + 追加測定
+              </button>
+              
+              <button
+                onClick={handleFinish}
+                className="flex-1 h-12 bg-gray-200 text-gray-700 rounded-lg font-bold text-sm"
+              >
+                結果を見る
+              </button>
+            </div>
+          </>
+        ) : (
           <button
-            onClick={() => fileInputRef.current?.click()}
-            className="flex-1 h-12 bg-gray-200 text-gray-700 rounded-lg font-bold text-sm"
+            onClick={() => setIsAdditionalMode(false)}
+            className="w-full h-12 bg-gray-200 text-gray-700 rounded-lg font-bold"
           >
-            CSV読込
+            ← 通常モードに戻る
           </button>
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept=".csv"
-            onChange={handleCSVImport}
-            className="hidden"
-          />
-          
-          <button
-            onClick={handleFinish}
-            className="flex-1 h-12 bg-gray-200 text-gray-700 rounded-lg font-bold text-sm"
-          >
-            結果を見る
-          </button>
-        </div>
+        )}
       </div>
 
       <div className="px-4 pb-4">
-        <h2 className="text-sm font-bold text-gray-600 mb-2">測定箇所一覧</h2>
+        <h2 className="text-sm font-bold text-gray-600 mb-2">
+          {isAdditionalMode ? '追加測定する箇所を選択' : '測定箇所一覧'}
+        </h2>
         <div className="space-y-2 max-h-[55vh] overflow-auto">
-          {points.map((point) => {
-            const status = getMeasurementStatus(point.id);
+          {points
+            .filter(point => !isAdditionalMode || hasMeasurement(point.id))
+            .map((point) => {
+              const status = getMeasurementStatus(point.id);
+              const additionalCount = getAdditionalCount(point.id);
             
-            return (
-              <button
-                key={point.id}
-                onClick={() => handleSelectPoint(point.id)}
-                className={`
-                  w-full p-3 rounded-lg text-left flex items-center justify-between
-                  ${status.isComplete ? 'bg-green-50 border border-green-200' : 'bg-white border border-gray-200'}
-                `}
-              >
-                <div>
-                  <div className="font-medium">{point.name}</div>
-                  <div className="flex items-center gap-2 mt-1">
-                    <span className={`px-2 py-0.5 rounded text-xs font-bold ${categoryColors[point.category]}`}>
-                      {categoryLabels[point.category]}
-                    </span>
-                    {status.total > 0 && (
-                      <span className="text-xs text-gray-500">
-                        {status.measured.length}/{status.total}台
+              return (
+                <button
+                  key={point.id}
+                  onClick={() => handleSelectPoint(point.id)}
+                  className={`
+                    w-full p-3 rounded-lg text-left flex items-center justify-between
+                    ${status.isComplete ? 'bg-green-50 border border-green-200' : 'bg-white border border-gray-200'}
+                  `}
+                >
+                  <div>
+                    <div className="font-medium">{point.name}</div>
+                    <div className="flex items-center gap-2 mt-1">
+                      <span className={`px-2 py-0.5 rounded text-xs font-bold ${categoryColors[point.category]}`}>
+                        {categoryLabels[point.category]}
                       </span>
+                      {status.total > 0 && (
+                        <span className="text-xs text-gray-500">
+                          {status.measured.length}/{status.total}台
+                        </span>
+                      )}
+                    </div>
+                    {/* 測定済み測定器の表示 */}
+                    {status.measured.length > 0 && (
+                      <div className="flex gap-1 mt-1">
+                        {status.measured.map(inst => (
+                          <span key={inst} className="text-xs bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded">
+                            {inst}
+                          </span>
+                        ))}
+                      </div>
                     )}
                   </div>
-                  {/* 測定済み測定器の表示 */}
-                  {status.measured.length > 0 && (
-                    <div className="flex gap-1 mt-1">
-                      {status.measured.map(inst => (
-                        <span key={inst} className="text-xs bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded">
-                          {inst}
-                        </span>
-                      ))}
-                    </div>
-                  )}
-                </div>
-                <div className="flex items-center gap-2">
-                  {status.isComplete && (
-                    <span className="text-green-500 text-xl">✓</span>
-                  )}
-                  <span className="text-gray-400">›</span>
-                </div>
-              </button>
-            );
-          })}
+                  <div className="flex items-center gap-2">
+                    {status.isComplete && (
+                      <span className="text-green-500 text-xl">✓</span>
+                    )}
+                    {additionalCount > 0 && (
+                      <span className="text-blue-500 text-sm font-bold">+{additionalCount}</span>
+                    )}
+                    <span className="text-gray-400">›</span>
+                  </div>
+                </button>
+              );
+            })}
+          {isAdditionalMode && points.filter(p => hasMeasurement(p.id)).length === 0 && (
+            <p className="text-center text-gray-500 py-4">測定済みの箇所がありません</p>
+          )}
         </div>
       </div>
 
