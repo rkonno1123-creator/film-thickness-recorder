@@ -13,11 +13,12 @@ interface MeasurementInputProps {
   lowerLimitPercent: number;
   upperLimitPercent: number;
   instrument: string;
-  onRegister: (values: number[]) => void;
+  onRegister: (values: number[], memo: string) => void;
   onSkip: () => void;
   onBack: () => void;
   onFinish: () => void;
   canGoBack: boolean;
+  isAdditionalMode?: boolean; // 追加測定モードか
 }
 
 const categoryLabels = {
@@ -47,10 +48,12 @@ export default function MeasurementInput({
   onBack,
   onFinish,
   canGoBack,
+  isAdditionalMode = false,
 }: MeasurementInputProps) {
   const [values, setValues] = useState<number[]>([]);
   const [inputBuffer, setInputBuffer] = useState('');
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [memo, setMemo] = useState('');
   
   const MIN_VALUES = 5;
   const MAX_VALUES = 10;
@@ -121,9 +124,22 @@ export default function MeasurementInput({
   // 登録
   const handleRegister = () => {
     if (canRegister) {
-      onRegister(values);
+      onRegister(values, memo);
       setValues([]);
       setInputBuffer('');
+      setMemo('');
+    }
+  };
+
+  // スキップ時の警告（5点未満で登録しようとした場合）
+  const handleSkipClick = () => {
+    if (values.length > 0 && values.length < MIN_VALUES) {
+      // 値が入力されてるけど5点未満 → 確認
+      if (confirm(`${values.length}点入力済みですが、登録せずにスキップしますか？\n（5点以上でないと登録できません）`)) {
+        onSkip();
+      }
+    } else {
+      onSkip();
     }
   };
 
@@ -137,6 +153,11 @@ export default function MeasurementInput({
               {categoryLabels[category]}
             </span>
             <span className="font-bold text-base truncate max-w-[180px]">{pointName}</span>
+            {isAdditionalMode && (
+              <span className="px-2 py-0.5 rounded-full text-xs font-bold bg-orange-100 text-orange-700">
+                追加
+              </span>
+            )}
           </div>
           <div className="flex items-center gap-2">
             <span className="text-xs text-gray-500 bg-gray-100 px-2 py-1 rounded">{instrument}</span>
@@ -214,13 +235,27 @@ export default function MeasurementInput({
           disabled={isFull}
         />
 
-        {/* 測定値リスト（下に移動） */}
+        {/* 測定値リスト */}
         <ValueList
           values={values}
           onDelete={handleDeleteValue}
           maxValues={MAX_VALUES}
           minValues={MIN_VALUES}
         />
+
+        {/* メモ欄 */}
+        <div className="bg-white rounded-lg shadow p-3">
+          <label className="block text-xs text-gray-500 mb-1">
+            📝 メモ（任意）
+          </label>
+          <input
+            type="text"
+            value={memo}
+            onChange={(e) => setMemo(e.target.value)}
+            placeholder="例: キャリブレーションやり直し、ダミーデータ"
+            className="w-full h-10 px-3 border border-gray-300 rounded-lg text-sm"
+          />
+        </div>
       </main>
 
       {/* フッター（コンパクト） */}
@@ -253,7 +288,7 @@ export default function MeasurementInput({
             戻る
           </button>
           <button
-            onClick={onSkip}
+            onClick={handleSkipClick}
             className="flex-1 h-10 rounded-lg font-bold text-sm bg-gray-200 text-gray-700 active:bg-gray-300"
           >
             スキップ

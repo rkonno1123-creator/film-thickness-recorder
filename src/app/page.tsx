@@ -24,6 +24,7 @@ interface SavedMeasurement {
   average: number;
   timestamp: string;
   synced: boolean;
+  memo?: string; // メモ（任意）
 }
 
 // セッション情報
@@ -106,6 +107,8 @@ export default function Home() {
   const [editingMeasurement, setEditingMeasurement] = useState<SavedMeasurement | null>(null);
   const [isLoadingSite, setIsLoadingSite] = useState(false);
   const [isAdditionalMode, setIsAdditionalMode] = useState(false); // 追加測定モード
+  const listRef = useRef<HTMLDivElement>(null); // リストのスクロール位置保持用
+  const [lastMeasuredPointId, setLastMeasuredPointId] = useState<string | null>(null); // 最後に測定した箇所
 
   // ローカルストレージから読み込み
   useEffect(() => {
@@ -132,6 +135,16 @@ export default function Home() {
       setTempSiteId(session.siteId || '');
     }
   }, []);
+
+  // リストに戻った時、最後に測定した箇所にスクロール
+  useEffect(() => {
+    if (viewMode === 'list' && lastMeasuredPointId && listRef.current) {
+      const element = document.getElementById(`point-${lastMeasuredPointId}`);
+      if (element) {
+        element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
+    }
+  }, [viewMode, lastMeasuredPointId]);
 
   // 現在の測定箇所
   const currentPoint = viewMode === 'measure' && selectedPointId
@@ -327,7 +340,7 @@ export default function Home() {
   };
 
   // 測定登録（上書きしない、常に追加）
-  const handleRegister = (values: number[]) => {
+  const handleRegister = (values: number[], memo: string) => {
     if (!currentPoint) return;
     
     const average = values.reduce((a, b) => a + b, 0) / values.length;
@@ -343,11 +356,15 @@ export default function Home() {
       average,
       timestamp: new Date().toISOString(),
       synced: false,
+      memo: memo || undefined, // 空文字の場合はundefined
     };
 
     const newMeasurements = [...measurements, newMeasurement];
     setMeasurements(newMeasurements);
     localStorage.setItem('measurements', JSON.stringify(newMeasurements));
+
+    // 最後に測定した箇所を記録
+    setLastMeasuredPointId(currentPoint.id);
 
     // 次へ進む
     if (viewMode === 'route') {
@@ -357,6 +374,7 @@ export default function Home() {
         setViewMode('summary');
       }
     } else {
+      // 追加測定モードの場合は追加モードのまま
       setViewMode('list');
       setSelectedPointId(null);
     }
@@ -411,7 +429,15 @@ export default function Home() {
   // 箇所を選択して測定器選択モーダルを表示
   const handleSelectPoint = (pointId: string) => {
     const instruments = sessionInfo.selectedInstruments || [];
-    // 選択した測定器が1つだけなら直接測定画面へ
+    
+    // 追加測定モードの場合は常にモーダル表示（1台でも）
+    if (isAdditionalMode) {
+      setPendingPointId(pointId);
+      setShowInstrumentModal(true);
+      return;
+    }
+    
+    // 通常モード：選択した測定器が1つだけなら直接測定画面へ
     if (instruments.length === 1) {
       const instrument = instruments[0];
       const newSession = { ...sessionInfo, instrument };
@@ -508,7 +534,7 @@ export default function Home() {
 
   // CSVエクスポート
   const handleExportCSV = () => {
-    const headers = ['ID', '箇所ID', '箇所名', '区分', '測定者', '測定器', '測定値', '平均値', '測定日時', '送信済み'];
+    const headers = ['ID', '箇所ID', '箇所名', '区分', '測定者', '測定器', '測定値', '平均値', '測定日時', '送信済み', 'メモ'];
     const rows = measurements.map(m => [
       m.id,
       m.pointId,
@@ -520,6 +546,7 @@ export default function Home() {
       m.average.toFixed(1),
       m.timestamp,
       m.synced ? '✓' : '',
+      m.memo || '',
     ]);
     
     const csv = [headers, ...rows].map(row => row.join(',')).join('\n');
@@ -700,6 +727,11 @@ export default function Home() {
                   <div className="text-sm text-gray-600">
                     平均: {m.average.toFixed(1)}μm ({m.values.length}点)
                   </div>
+                  {m.memo && (
+                    <div className="text-xs text-orange-600 mt-1">
+                      📝 {m.memo}
+                    </div>
+                  )}
                 </div>
                 <div className="flex gap-1">
                   {!m.synced && (
@@ -832,6 +864,9 @@ export default function Home() {
           <div className="bg-white px-4 py-2 border-b">
             <div className="text-sm text-gray-500">
               {sessionInfo.operator} / {sessionInfo.instrument}
+              {isAdditionalMode && (
+                <span className="ml-2 text-orange-600 font-bold">【追加測定】</span>
+              )}
             </div>
           </div>
         )}
@@ -849,6 +884,7 @@ export default function Home() {
           onBack={handleBack}
           onFinish={handleFinish}
           canGoBack={viewMode === 'route' ? currentIndex > 0 : true}
+          isAdditionalMode={isAdditionalMode}
         />
       </div>
     );
@@ -919,9 +955,9 @@ export default function Home() {
         )}
       </div>
 
-      <div className="px-4 pb-4">
+      <div className="px-4 pb-4" ref={listRef}>
         <h2 className="text-sm font-bold text-gray-600 mb-2">
-          {isAdditionalMode ? '追加測定する箇所を選択' : '測定箇所一覧'}
+          {isAdditionalMode ? '追加測定する箇所を選択（測定器を必ず選択）' : '測定箇所一覧'}
         </h2>
         <div className="space-y-2 max-h-[55vh] overflow-auto">
           {points
@@ -932,11 +968,13 @@ export default function Home() {
             
               return (
                 <button
+                  id={`point-${point.id}`}
                   key={point.id}
                   onClick={() => handleSelectPoint(point.id)}
                   className={`
                     w-full p-3 rounded-lg text-left flex items-center justify-between
                     ${status.isComplete ? 'bg-green-50 border border-green-200' : 'bg-white border border-gray-200'}
+                    ${lastMeasuredPointId === point.id ? 'ring-2 ring-blue-400' : ''}
                   `}
                 >
                   <div>
@@ -989,9 +1027,14 @@ export default function Home() {
               <p className="text-sm text-gray-500 mt-1">
                 {points.find(p => p.id === pendingPointId)?.name}
               </p>
+              {isAdditionalMode && (
+                <p className="text-xs text-orange-600 mt-1">
+                  ※ 追加測定：測定器を選択してください
+                </p>
+              )}
             </div>
             <div className="p-4 space-y-2">
-              {(sessionInfo.selectedInstruments || []).map((instrument) => {
+              {(isAdditionalMode ? INSTRUMENTS : sessionInfo.selectedInstruments || []).map((instrument) => {
                 const alreadyMeasured = pendingPointId ? isMeasuredWithInstrument(pendingPointId, instrument) : false;
                 return (
                   <button
